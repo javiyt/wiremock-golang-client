@@ -1,17 +1,24 @@
+//go:generate easyjson $GOFILE
+
 package wiremock
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
+
+	"github.com/mailru/easyjson"
 )
 
+// Client wiremock client instance
 type Client struct {
 	host   string
 	port   uint
 	client *http.Client
 }
 
+//easyjson:json
 type wRequest struct {
 	Method               string            `json:"method"`
 	URL                  string            `json:"url"`
@@ -23,21 +30,35 @@ type wRequest struct {
 	BasicAuthCredentials struct {
 		Password string `json:"password"`
 		Username string `json:"username"`
-	} `json:"queryParameters,omitempty"`
+	} `json:"basicAuthCredentials,omitempty"`
 	Cookies      map[string]string `json:"cookies,omitempty"`
 	BodyPatterns map[string]string `json:"bodyPatterns,omitempty"`
 }
 
+//easyjson:json
 type wResponse struct {
-	Median       uint   `json:"median,omitempty"`
-	Sigma        uint   `json:"sigma,omitempty"`
-	Status       uint   `json:"status"`
-	Body         string `json:"body,omitempty"`
-	BodyFileName string `json:"bodyFileName,omitempty"`
+	Median                        uint              `json:"median,omitempty"`
+	Sigma                         uint              `json:"sigma,omitempty"`
+	Type                          string            `json:"type,omitempty"`
+	Status                        uint              `json:"status"`
+	StatusMessage                 string            `json:"statusMessage,omitempty"`
+	Headers                       map[string]string `json:"headers,omitempty"`
+	AdditionalProxyRequestHeaders map[string]string `json:"additionalProxyRequestHeaders,omitempty"`
+	Body                          string            `json:"body,omitempty"`
+	Base64Body                    string            `json:"base64Body,omitempty"`
+	JSONBody                      json.RawMessage   `json:"jsonBody,omitempty"`
+	BodyFileName                  string            `json:"bodyFileName,omitempty"`
+	Fault                         string            `json:"fault,omitempty"`
+	FixedDelayMilliseconds        uint              `json:"fixedDelayMilliseconds,omitempty"`
+	FromConfiguredStub            bool              `json:"fromConfiguredStub,omitempty"`
+	TransformerParameters         map[string]string `json:"transformerParameters,omitempty"`
+	Transformers                  []string          `json:"transformers,omitempty"`
 }
 
+// Mappings hold mappings configured on wiremock
+//easyjson:json
 type Mappings struct {
-	Id                    string            `json:"id"`
+	ID                    string            `json:"id"`
 	UUID                  string            `json:"uuid,omitempty"`
 	Name                  string            `json:"name,omitempty"`
 	Request               wRequest          `json:"request"`
@@ -51,6 +72,8 @@ type Mappings struct {
 	Metadata              map[string]string `json:"metadata,omitempty"`
 }
 
+// Mapping Main mapping data
+//easyjson:json
 type Mapping struct {
 	Mappings []Mappings `json:"mappings"`
 	Meta     struct {
@@ -58,6 +81,7 @@ type Mapping struct {
 	} `json:"meta"`
 }
 
+// NewWiremockClient generates a new wiremock client instance
 func NewWiremockClient(host string, port uint) *Client {
 	return &Client{
 		host:   host,
@@ -66,26 +90,27 @@ func NewWiremockClient(host string, port uint) *Client {
 	}
 }
 
-func (w *Client) Mappings() ([]Mappings, error) {
-	var mappings []Mappings
-	url := fmt.Sprintf("http://%s:%v/__admin/mappings", w.host, w.port)
-	resp, err := w.client.Get(url)
+// Mappings get all mappings defined on wiremock
+func (w *Client) Mappings() (Mapping, error) {
+	var mapping Mapping
+
+	resp, err := w.client.Get(fmt.Sprintf("http://%s:%v/__admin/mappings", w.host, w.port))
 	if err != nil {
-		return nil, err
+		return Mapping{}, err
 	}
+
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("error got from API, status code: %v", resp.StatusCode)
+		return Mapping{}, fmt.Errorf("error got from API, status code: %v", resp.StatusCode)
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("error reading response body: %w", err)
+		return Mapping{}, fmt.Errorf("error reading response body: %w", err)
 	}
 
-	fmt.Printf("%s", body)
+	easyjson.Unmarshal(body, &mapping)
 
-	return mappings, nil
-
+	return mapping, nil
 }

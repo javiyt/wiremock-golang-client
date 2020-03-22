@@ -1,0 +1,13 @@
+{
+    "request": {
+        "method": "POST",
+        "url": "/hello"
+    },
+    "response": {
+        "status": 200,
+        "body": "Hello World!! you did a POST request",
+        "headers": {
+            "Content-Type": "text/plain"
+        }
+    }
+}
