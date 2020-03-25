@@ -2,14 +2,14 @@
 
 SHELL := /bin/bash
 .SHELLFLAGS := -ec
+.DEFAULT_GOAL := test
 
 format: ## Fixes format errors by applying the canonical Go style
 	gofmt -d -s -w pkg
 
-test:
+test: generate
 	docker-compose up -d
 	go test -gcflags '-N -l' -cover -v -race -p 1 ./...
-	docker logs wiremock-golang-client_wiremock_1
 	docker-compose down
 
 generate: clean
