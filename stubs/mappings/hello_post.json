@@ -1,4 +1,6 @@
 {
+    "id": "012e3261-3398-46da-9811-deb02de35872",
+    "uuid": "012e3261-3398-46da-9811-deb02de35872",
     "request": {
         "method": "POST",
         "url": "/hello"

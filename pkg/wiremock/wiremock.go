@@ -1,5 +1,3 @@
-//go:generate easyjson $GOFILE
-
 package wiremock
 
 import (
@@ -8,17 +6,16 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	"github.com/mailru/easyjson"
+	"github.com/json-iterator/go"
 )
 
-// Client wiremock client instance
+// Client WireMock client instance
 type Client struct {
 	host   string
 	port   uint
 	client *http.Client
 }
 
-//easyjson:json
 type wRequest struct {
 	Method               string            `json:"method"`
 	URL                  string            `json:"url"`
@@ -35,7 +32,6 @@ type wRequest struct {
 	BodyPatterns map[string]string `json:"bodyPatterns,omitempty"`
 }
 
-//easyjson:json
 type wResponse struct {
 	Median                        uint              `json:"median,omitempty"`
 	Sigma                         uint              `json:"sigma,omitempty"`
@@ -55,8 +51,7 @@ type wResponse struct {
 	Transformers                  []string          `json:"transformers,omitempty"`
 }
 
-// Mappings hold mappings configured on wiremock
-//easyjson:json
+// Mappings hold mappings configured on WireMock
 type Mappings struct {
 	ID                    string            `json:"id"`
 	UUID                  string            `json:"uuid,omitempty"`
@@ -73,7 +68,6 @@ type Mappings struct {
 }
 
 // Mapping Main mapping data
-//easyjson:json
 type Mapping struct {
 	Mappings []Mappings `json:"mappings"`
 	Meta     struct {
@@ -81,8 +75,8 @@ type Mapping struct {
 	} `json:"meta"`
 }
 
-// NewWiremockClient generates a new wiremock client instance
-func NewWiremockClient(host string, port uint) *Client {
+// NewWireMockClient generates a new WireMock client instance
+func NewWireMockClient(host string, port uint) *Client {
 	return &Client{
 		host:   host,
 		port:   port,
@@ -90,7 +84,7 @@ func NewWiremockClient(host string, port uint) *Client {
 	}
 }
 
-// Mappings get all mappings defined on wiremock
+// Mappings get all mappings defined on WireMock
 func (w *Client) Mappings() (Mapping, error) {
 	var mapping Mapping
 
@@ -110,7 +104,10 @@ func (w *Client) Mappings() (Mapping, error) {
 		return Mapping{}, fmt.Errorf("error reading response body: %w", err)
 	}
 
-	easyjson.Unmarshal(body, &mapping)
+	err = jsoniter.Unmarshal(body, &mapping)
+	if err != nil {
+		return Mapping{}, fmt.Errorf("error unmarshaling response %w", err)
+	}
 
 	return mapping, nil
 }
