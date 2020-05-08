@@ -1,0 +1,15 @@
+{
+    "id": "3b368d81-cc7d-4003-96a6-a8ec4ca36b0f",
+    "uuid": "3b368d81-cc7d-4003-96a6-a8ec4ca36b0f",
+    "request": {
+        "method": "GET",
+        "url": "/hello/world"
+    },
+    "response": {
+        "status": 200,
+        "body": "Hello world!",
+        "headers": {
+            "Content-Type": "text/plain"
+        }
+    }
+}
