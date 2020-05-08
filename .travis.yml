@@ -1,8 +1,19 @@
 language: go
 go:
-    - '1.13.9'
-    - '1.14.2'
+  - '1.13.9'
+  - '1.14.2'
 services:
-    - docker
+  - docker
 before_install:
-    - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.26.0
+  - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.26.0
+  - go get -t -v ./...
+before_script:
+  - go generate ./...
+  - docker-compose up -d
+script:
+  - golangci-lint run ./...
+  - go test -race -coverprofile=coverage.txt -covermode=atomic ./...
+after_script:
+  - docker-compose down
+after_success:
+  - bash <(curl -s https://codecov.io/bash)
