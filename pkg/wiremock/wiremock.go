@@ -3,7 +3,7 @@ package wiremock
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 
 	"github.com/json-iterator/go"
@@ -99,7 +99,7 @@ func (w *Client) Mappings() (Mapping, error) {
 		return Mapping{}, fmt.Errorf("error got from API, status code: %v", resp.StatusCode)
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return Mapping{}, fmt.Errorf("error reading response body: %w", err)
 	}
