@@ -1,6 +1,7 @@
 package wiremock
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,7 +17,8 @@ type Client struct {
 	client *http.Client
 }
 
-type wRequest struct {
+// Request holds the request matcher data for a WireMock mapping.
+type Request struct {
 	Method               string            `json:"method"`
 	URL                  string            `json:"url"`
 	URLPath              string            `json:"urlPath,omitempty"`
@@ -32,7 +34,8 @@ type wRequest struct {
 	BodyPatterns map[string]string `json:"bodyPatterns,omitempty"`
 }
 
-type wResponse struct {
+// Response holds the response data for a WireMock mapping.
+type Response struct {
 	Median                        uint              `json:"median,omitempty"`
 	Sigma                         uint              `json:"sigma,omitempty"`
 	Type                          string            `json:"type,omitempty"`
@@ -56,8 +59,8 @@ type Mappings struct {
 	ID                    string            `json:"id"`
 	UUID                  string            `json:"uuid,omitempty"`
 	Name                  string            `json:"name,omitempty"`
-	Request               wRequest          `json:"request"`
-	Response              wResponse         `json:"response"`
+	Request               Request           `json:"request"`
+	Response              Response          `json:"response"`
 	Persistent            bool              `json:"persistent,omitempty"`
 	Priority              uint              `json:"priority,omitempty"`
 	ScenarioName          string            `json:"scenarioName,omitempty"`
@@ -114,4 +117,47 @@ func (w *Client) Mappings() (Mapping, error) {
 	}
 
 	return mapping, nil
+}
+
+// SaveMapping stores a new mapping in WireMock.
+func (w *Client) SaveMapping(mapping Mappings) (Mappings, error) {
+	var savedMapping Mappings
+
+	requestBody, err := jsoniter.Marshal(mapping)
+	if err != nil {
+		return Mappings{}, fmt.Errorf("error marshaling mapping %w", err)
+	}
+
+	req, err := http.NewRequest(
+		http.MethodPost,
+		fmt.Sprintf("http://%s:%v/__admin/mappings", w.host, w.port),
+		bytes.NewReader(requestBody),
+	)
+	if err != nil {
+		return Mappings{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := w.client.Do(req)
+	if err != nil {
+		return Mappings{}, err
+	}
+
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusCreated {
+		return Mappings{}, fmt.Errorf("error got from API, status code: %v", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return Mappings{}, fmt.Errorf("error reading response body: %w", err)
+	}
+
+	err = jsoniter.Unmarshal(body, &savedMapping)
+	if err != nil {
+		return Mappings{}, fmt.Errorf("error unmarshaling response %w", err)
+	}
+
+	return savedMapping, nil
 }

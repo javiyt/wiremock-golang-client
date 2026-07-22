@@ -1,6 +1,7 @@
 package wiremock_test
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -148,6 +149,131 @@ func TestClient_Mappings(t *testing.T) {
 	})
 }
 
+func TestClient_SaveMapping(t *testing.T) {
+	t.Run("it should fail when not possible to save mapping", func(t *testing.T) {
+		wClient := wiremock.NewWireMockClient("localhost", 8000, &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				return nil, errors.New("error saving mapping")
+			}),
+		})
+
+		_, err := wClient.SaveMapping(wiremock.Mappings{})
+
+		require.ErrorContains(t, err, "error saving mapping")
+	})
+
+	t.Run("it should fail when API response is not created", func(t *testing.T) {
+		wClient := wiremock.NewWireMockClient("localhost", 8000, &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusUnprocessableEntity,
+					Body:       io.NopCloser(strings.NewReader("")),
+				}, nil
+			}),
+		})
+
+		_, err := wClient.SaveMapping(wiremock.Mappings{})
+
+		require.EqualError(t, err, "error got from API, status code: 422")
+	})
+
+	t.Run("it should fail when response body cannot be read", func(t *testing.T) {
+		wClient := wiremock.NewWireMockClient("localhost", 8000, &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusCreated,
+					Body:       errorReadCloser{},
+				}, nil
+			}),
+		})
+
+		_, err := wClient.SaveMapping(wiremock.Mappings{})
+
+		require.EqualError(t, err, "error reading response body: error reading mappings")
+	})
+
+	t.Run("it should fail when response body is empty", func(t *testing.T) {
+		wClient := saveMappingClientFromServer(t, "")
+
+		_, err := wClient.SaveMapping(wiremock.Mappings{})
+
+		require.ErrorContains(t, err, "error unmarshaling response")
+	})
+
+	t.Run("it should fail when response body is a malformed JSON", func(t *testing.T) {
+		wClient := saveMappingClientFromServer(t, "{\"mapping")
+
+		_, err := wClient.SaveMapping(wiremock.Mappings{})
+
+		require.ErrorContains(t, err, "error unmarshaling response")
+	})
+
+	t.Run("it should save a new mapping", func(t *testing.T) {
+		wClient := wiremock.NewWireMockClient("localhost", 8000, &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				require.Equal(t, http.MethodPost, req.Method)
+				require.Equal(t, "http://localhost:8000/__admin/mappings", req.URL.String())
+				require.Equal(t, "application/json", req.Header.Get("Content-Type"))
+
+				var mapping wiremock.Mappings
+				err := json.NewDecoder(req.Body).Decode(&mapping)
+				require.NoError(t, err)
+				require.Equal(t, "hello mapping", mapping.Name)
+				require.Equal(t, "/hello", mapping.Request.URL)
+				require.Equal(t, http.MethodGet, mapping.Request.Method)
+				require.Equal(t, uint(http.StatusOK), mapping.Response.Status)
+				require.Equal(t, "Hello World!!", mapping.Response.Body)
+				require.True(t, mapping.Persistent)
+				require.Equal(t, uint(1), mapping.Priority)
+
+				return &http.Response{
+					StatusCode: http.StatusCreated,
+					Body: io.NopCloser(strings.NewReader(`{
+						"id": "012e3261-3398-46da-9811-deb02de35872",
+						"uuid": "012e3261-3398-46da-9811-deb02de35872",
+						"name": "hello mapping",
+						"request": {
+							"url": "/hello",
+							"method": "GET"
+						},
+						"response": {
+							"status": 200,
+							"body": "Hello World!!"
+						},
+						"persistent": true,
+						"priority": 1
+					}`)),
+				}, nil
+			}),
+		})
+
+		mapping, err := wClient.SaveMapping(wiremock.Mappings{
+			Name: "hello mapping",
+			Request: wiremock.Request{
+				Method: http.MethodGet,
+				URL:    "/hello",
+			},
+			Response: wiremock.Response{
+				Status: http.StatusOK,
+				Body:   "Hello World!!",
+			},
+			Persistent: true,
+			Priority:   1,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, "012e3261-3398-46da-9811-deb02de35872", mapping.ID)
+		require.Equal(t, "012e3261-3398-46da-9811-deb02de35872", mapping.UUID)
+		require.Equal(t, "hello mapping", mapping.Name)
+		require.Equal(t, "/hello", mapping.Request.URL)
+		require.Equal(t, "GET", mapping.Request.Method)
+		require.Equal(t, uint(200), mapping.Response.Status)
+		require.Equal(t, "Hello World!!", mapping.Response.Body)
+		require.True(t, mapping.Persistent)
+		require.Equal(t, uint(1), mapping.Priority)
+	})
+}
+
 func wiremockClientFromServer(t *testing.T, body string) *wiremock.Client {
 	t.Helper()
 
@@ -157,6 +283,33 @@ func wiremockClientFromServer(t *testing.T, body string) *wiremock.Client {
 
 		w.WriteHeader(http.StatusOK)
 		_, err := w.Write([]byte(body))
+		require.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	host, portValue, found := strings.Cut(strings.TrimPrefix(server.URL, "http://"), ":")
+	require.True(t, found)
+
+	port, err := strconv.ParseUint(portValue, 10, 0)
+	require.NoError(t, err)
+
+	return wiremock.NewWireMockClient(host, uint(port), nil)
+}
+
+func saveMappingClientFromServer(t *testing.T, body string) *wiremock.Client {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		require.Equal(t, http.MethodPost, req.Method)
+		require.Equal(t, "/__admin/mappings", req.URL.Path)
+		require.Equal(t, "application/json", req.Header.Get("Content-Type"))
+
+		var mapping wiremock.Mappings
+		err := json.NewDecoder(req.Body).Decode(&mapping)
+		require.NoError(t, err)
+
+		w.WriteHeader(http.StatusCreated)
+		_, err = w.Write([]byte(body))
 		require.NoError(t, err)
 	}))
 	t.Cleanup(server.Close)
