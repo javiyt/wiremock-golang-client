@@ -76,11 +76,15 @@ type Mapping struct {
 }
 
 // NewWireMockClient generates a new WireMock client instance
-func NewWireMockClient(host string, port uint) *Client {
+func NewWireMockClient(host string, port uint, client *http.Client) *Client {
+	if client == nil {
+		client = &http.Client{Transport: &http.Transport{}}
+	}
+
 	return &Client{
 		host:   host,
 		port:   port,
-		client: &http.Client{Transport: &http.Transport{}},
+		client: client,
 	}
 }
 

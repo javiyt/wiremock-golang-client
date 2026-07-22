@@ -12,7 +12,7 @@ linter:
 
 run-test:
 	docker-compose up -d
-	go test -gcflags '-N -l' -cover -v -race -p 1 ./...
+	sh test.sh
 	docker-compose down
 
 test: generate linter run-test ## Run all test suite
