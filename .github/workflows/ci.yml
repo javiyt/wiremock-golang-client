@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  GOLANGCI_LINT_VERSION: v2.11
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Generate
+        run: go generate ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          args: ./...
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Generate
+        run: go generate ./...
+
+      - name: Start WireMock
+        run: |
+          if docker compose version >/dev/null 2>&1; then
+            docker compose up -d
+          else
+            docker-compose up -d
+          fi
+
+      - name: Wait for WireMock
+        run: |
+          for attempt in {1..30}; do
+            if curl -fsS http://localhost:8080/__admin/mappings >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          if docker compose version >/dev/null 2>&1; then
+            docker compose logs
+          else
+            docker-compose logs
+          fi
+          exit 1
+
+      - name: Test
+        run: go test -race -coverprofile=coverage.txt -covermode=atomic ./...
+
+      - name: Stop WireMock
+        if: always()
+        run: |
+          if docker compose version >/dev/null 2>&1; then
+            docker compose down
+          else
+            docker-compose down
+          fi
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.txt
+          fail_ci_if_error: false
