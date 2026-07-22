@@ -10,6 +10,10 @@ func TestWireMockClient(t *testing.T) {
 	wc := wiremock.NewWireMockClient("localhost", 8080, nil)
 	mapping, err := wc.Mappings()
 
+	if err != nil {
+		t.Skipf("WireMock is not running on localhost:8080: %v", err)
+	}
+
 	assert.NoError(t, err)
 	assert.Equal(t, uint(2), mapping.Meta.Total)
 	assert.Len(t, mapping.Mappings, 2)
