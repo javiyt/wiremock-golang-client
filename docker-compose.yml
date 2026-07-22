@@ -1,9 +1,8 @@
-version: '3.7'
 services:
-    wiremock:
-        image: rodolpheche/wiremock:2.26.3-alpine
-        ports: 
-            - 8080:8080
-        volumes: 
-            - ./stubs:/home/wiremock
-        command: --verbose
+  wiremock:
+    image: wiremock/wiremock:3.13.2-alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./stubs:/home/wiremock
+    command: --verbose
