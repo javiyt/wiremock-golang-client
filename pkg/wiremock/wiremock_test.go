@@ -149,6 +149,34 @@ func TestClient_Mappings(t *testing.T) {
 	})
 }
 
+func TestClient_MappingsWithOptions(t *testing.T) {
+	limit := uint(10)
+	offset := uint(50)
+	wClient := wiremock.NewWireMockClient("localhost", 8000, &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodGet, req.Method)
+			require.Equal(t, "http://localhost:8000/__admin/mappings?limit=10&offset=50", req.URL.String())
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(`{
+					"mappings": [{"id": "one", "request": {"method": "GET", "url": "/one"}, "response": {"status": 200}}],
+					"meta": {"total": 1}
+				}`)),
+			}, nil
+		}),
+	})
+
+	mappings, err := wClient.MappingsWithOptions(wiremock.MappingsOptions{
+		Limit:  &limit,
+		Offset: &offset,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, uint(1), mappings.Meta.Total)
+	require.Equal(t, "one", mappings.Mappings[0].ID)
+}
+
 func TestClient_SaveMapping(t *testing.T) {
 	t.Run("it should fail when not possible to save mapping", func(t *testing.T) {
 		wClient := wiremock.NewWireMockClient("localhost", 8000, &http.Client{
@@ -274,6 +302,253 @@ func TestClient_SaveMapping(t *testing.T) {
 	})
 }
 
+func TestClient_MappingActions(t *testing.T) {
+	tests := []struct {
+		name         string
+		call         func(*wiremock.Client) error
+		method       string
+		path         string
+		statusCode   int
+		errorMessage string
+	}{
+		{
+			name:       "delete all mappings",
+			call:       func(client *wiremock.Client) error { return client.DeleteMappings() },
+			method:     http.MethodDelete,
+			path:       "/__admin/mappings",
+			statusCode: http.StatusOK,
+		},
+		{
+			name:       "reset mappings",
+			call:       func(client *wiremock.Client) error { return client.ResetMappings() },
+			method:     http.MethodPost,
+			path:       "/__admin/mappings/reset",
+			statusCode: http.StatusOK,
+		},
+		{
+			name:       "persist mappings",
+			call:       func(client *wiremock.Client) error { return client.PersistMappings() },
+			method:     http.MethodPost,
+			path:       "/__admin/mappings/save",
+			statusCode: http.StatusOK,
+		},
+		{
+			name:       "delete mapping by ID",
+			call:       func(client *wiremock.Client) error { return client.DeleteMapping("stub id") },
+			method:     http.MethodDelete,
+			path:       "/__admin/mappings/stub%20id",
+			statusCode: http.StatusOK,
+		},
+		{
+			name:       "delete unmatched mappings",
+			call:       func(client *wiremock.Client) error { return client.DeleteUnmatchedMappings() },
+			method:     http.MethodDelete,
+			path:       "/__admin/mappings/unmatched",
+			statusCode: http.StatusOK,
+		},
+		{
+			name:         "returns unexpected status errors",
+			call:         func(client *wiremock.Client) error { return client.DeleteMappings() },
+			method:       http.MethodDelete,
+			path:         "/__admin/mappings",
+			statusCode:   http.StatusInternalServerError,
+			errorMessage: "error got from API, status code: 500",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wClient := wiremock.NewWireMockClient("localhost", 8000, &http.Client{
+				Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					require.Equal(t, tt.method, req.Method)
+					require.Equal(t, tt.path, req.URL.EscapedPath())
+					require.Empty(t, req.Header.Get("Content-Type"))
+
+					return &http.Response{
+						StatusCode: tt.statusCode,
+						Body:       io.NopCloser(strings.NewReader("")),
+					}, nil
+				}),
+			})
+
+			err := tt.call(wClient)
+			if tt.errorMessage != "" {
+				require.EqualError(t, err, tt.errorMessage)
+				return
+			}
+
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestClient_MappingByID(t *testing.T) {
+	t.Run("it should get a mapping by ID", func(t *testing.T) {
+		wClient := wiremock.NewWireMockClient("localhost", 8000, &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				require.Equal(t, http.MethodGet, req.Method)
+				require.Equal(t, "/__admin/mappings/012e3261-3398-46da-9811-deb02de35872", req.URL.Path)
+
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body: io.NopCloser(strings.NewReader(`{
+						"id": "012e3261-3398-46da-9811-deb02de35872",
+						"request": {"method": "GET", "url": "/hello"},
+						"response": {"status": 200}
+					}`)),
+				}, nil
+			}),
+		})
+
+		mapping, err := wClient.Mapping("012e3261-3398-46da-9811-deb02de35872")
+
+		require.NoError(t, err)
+		require.Equal(t, "012e3261-3398-46da-9811-deb02de35872", mapping.ID)
+	})
+
+	t.Run("it should return not found errors", func(t *testing.T) {
+		wClient := wiremock.NewWireMockClient("localhost", 8000, &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusNotFound,
+					Body:       io.NopCloser(strings.NewReader("")),
+				}, nil
+			}),
+		})
+
+		_, err := wClient.Mapping("missing")
+
+		require.EqualError(t, err, "error got from API, status code: 404")
+	})
+}
+
+func TestClient_UpdateMapping(t *testing.T) {
+	wClient := wiremock.NewWireMockClient("localhost", 8000, &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodPut, req.Method)
+			require.Equal(t, "/__admin/mappings/stub-id", req.URL.Path)
+			require.Equal(t, "application/json", req.Header.Get("Content-Type"))
+
+			var mapping wiremock.Mappings
+			err := json.NewDecoder(req.Body).Decode(&mapping)
+			require.NoError(t, err)
+			require.Equal(t, "updated mapping", mapping.Name)
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(`{
+					"id": "stub-id",
+					"name": "updated mapping",
+					"request": {"method": "GET", "url": "/updated"},
+					"response": {"status": 201}
+				}`)),
+			}, nil
+		}),
+	})
+
+	mapping, err := wClient.UpdateMapping("stub-id", wiremock.Mappings{
+		Name: "updated mapping",
+		Request: wiremock.Request{
+			Method: http.MethodGet,
+			URL:    "/updated",
+		},
+		Response: wiremock.Response{
+			Status: http.StatusCreated,
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "stub-id", mapping.ID)
+	require.Equal(t, "updated mapping", mapping.Name)
+	require.Equal(t, uint(http.StatusCreated), mapping.Response.Status)
+}
+
+func TestClient_ImportMappings(t *testing.T) {
+	wClient := wiremock.NewWireMockClient("localhost", 8000, &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodPost, req.Method)
+			require.Equal(t, "/__admin/mappings/import", req.URL.Path)
+			require.Equal(t, "application/json", req.Header.Get("Content-Type"))
+
+			var request wiremock.ImportMappingsRequest
+			err := json.NewDecoder(req.Body).Decode(&request)
+			require.NoError(t, err)
+			require.Len(t, request.Mappings, 1)
+			require.Equal(t, "imported", request.Mappings[0].Name)
+			require.Equal(t, wiremock.DuplicatePolicyIgnore, request.ImportOptions.DuplicatePolicy)
+			require.True(t, request.ImportOptions.DeleteAllNotInImport)
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("")),
+			}, nil
+		}),
+	})
+
+	err := wClient.ImportMappings(wiremock.ImportMappingsRequest{
+		Mappings: []wiremock.Mappings{{Name: "imported"}},
+		ImportOptions: &wiremock.ImportMappingsOptions{
+			DuplicatePolicy:      wiremock.DuplicatePolicyIgnore,
+			DeleteAllNotInImport: true,
+		},
+	})
+
+	require.NoError(t, err)
+}
+
+func TestClient_MetadataMappings(t *testing.T) {
+	filter := wiremock.MetadataFilter{
+		"matchesJsonPath": map[string]any{
+			"expression": "$.tag",
+			"equalTo":    "payments",
+		},
+	}
+
+	t.Run("it should find mappings by metadata", func(t *testing.T) {
+		wClient := metadataClient(t, "/__admin/mappings/find-by-metadata", filter, `{
+			"mappings": [{"id": "matched", "request": {"method": "GET", "url": "/payments"}, "response": {"status": 200}}],
+			"meta": {"total": 1}
+		}`)
+
+		mappings, err := wClient.FindMappingsByMetadata(filter)
+
+		require.NoError(t, err)
+		require.Equal(t, uint(1), mappings.Meta.Total)
+		require.Equal(t, "matched", mappings.Mappings[0].ID)
+	})
+
+	t.Run("it should remove mappings by metadata", func(t *testing.T) {
+		wClient := metadataClient(t, "/__admin/mappings/remove-by-metadata", filter, "")
+
+		err := wClient.RemoveMappingsByMetadata(filter)
+
+		require.NoError(t, err)
+	})
+}
+
+func TestClient_UnmatchedMappings(t *testing.T) {
+	wClient := wiremock.NewWireMockClient("localhost", 8000, &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodGet, req.Method)
+			require.Equal(t, "/__admin/mappings/unmatched", req.URL.Path)
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(`{
+					"mappings": [{"id": "unmatched", "request": {"method": "GET", "url": "/unused"}, "response": {"status": 200}}],
+					"meta": {"total": 1}
+				}`)),
+			}, nil
+		}),
+	})
+
+	mappings, err := wClient.UnmatchedMappings()
+
+	require.NoError(t, err)
+	require.Equal(t, uint(1), mappings.Meta.Total)
+	require.Equal(t, "unmatched", mappings.Mappings[0].ID)
+}
+
 func wiremockClientFromServer(t *testing.T, body string) *wiremock.Client {
 	t.Helper()
 
@@ -294,6 +569,28 @@ func wiremockClientFromServer(t *testing.T, body string) *wiremock.Client {
 	require.NoError(t, err)
 
 	return wiremock.NewWireMockClient(host, uint(port), nil)
+}
+
+func metadataClient(t *testing.T, path string, expectedFilter wiremock.MetadataFilter, body string) *wiremock.Client {
+	t.Helper()
+
+	return wiremock.NewWireMockClient("localhost", 8000, &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodPost, req.Method)
+			require.Equal(t, path, req.URL.Path)
+			require.Equal(t, "application/json", req.Header.Get("Content-Type"))
+
+			var filter wiremock.MetadataFilter
+			err := json.NewDecoder(req.Body).Decode(&filter)
+			require.NoError(t, err)
+			require.Equal(t, expectedFilter, filter)
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+			}, nil
+		}),
+	})
 }
 
 func saveMappingClientFromServer(t *testing.T, body string) *wiremock.Client {
