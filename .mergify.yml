@@ -1,0 +1,13 @@
+# Mergify configuration - auto-merge for javiyt's PRs after CI passes
+pull_request_rules:
+  - name: Automatic merge for javiyt's PRs after CI passes
+    conditions:
+      - "author=javiyt"
+      - "status-success=*"
+      - "base=main"
+      - "-conflict"
+      - "-draft"
+    actions:
+      rebase: {}
+      merge:
+        method: squash
