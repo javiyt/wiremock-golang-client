@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 env:
-  GOLANGCI_LINT_VERSION: v2.11
+  GOLANGCI_LINT_VERSION: v2.15.0
 
 jobs:
   lint:
@@ -35,6 +35,7 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
+          install-mode: goinstall
           args: ./...
 
   test:

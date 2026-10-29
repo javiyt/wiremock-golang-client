@@ -1,6 +1,6 @@
 module github.com/javiyt/wiremock-golang-client
 
-go 1.26
+go 1.27.3
 
 require (
 	github.com/json-iterator/go v1.1.12
